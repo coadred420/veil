@@ -3,8 +3,9 @@ import type { Metadata, Viewport } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'Veil — Fast Web Proxy',
-  description: 'Browse the web through a fast server-side proxy.',
+  title: 'Veil — Private Proxy Browser',
+  description:
+    'A private browser-in-browser web proxy with tabs, URL encryption, tracker blocking, and custom themes.',
   generator: 'v0.app',
   icons: {
     icon: [
@@ -26,11 +27,8 @@ export const metadata: Metadata = {
 }
 
 export const viewport: Viewport = {
-  colorScheme: 'light dark',
-  themeColor: [
-    { media: '(prefers-color-scheme: light)', color: 'white' },
-    { media: '(prefers-color-scheme: dark)', color: 'black' },
-  ],
+  colorScheme: 'dark',
+  themeColor: '#070b14',
 }
 
 export default function RootLayout({

@@ -161,3 +161,52 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Veil browser themes. Each theme sets a palette of CSS variables that the
+   shell consumes via bg-[var(--veil-*)] utilities. --accent is overridden
+   inline per user selection.
+--------------------------------------------------------------------------- */
+.veil-root {
+  --accent: #34d399;
+}
+.theme-midnight {
+  --veil-bg: #070b14;
+  --veil-panel: #0d1524;
+  --veil-panel-2: #111c30;
+  --veil-fg: #e6edf7;
+  --veil-muted: #8695ab;
+  --veil-border: #1e2c44;
+}
+.theme-aurora {
+  --veil-bg: #04100f;
+  --veil-panel: #0a1f1d;
+  --veil-panel-2: #0e2a27;
+  --veil-fg: #ddf7f2;
+  --veil-muted: #7fb3aa;
+  --veil-border: #16403a;
+}
+.theme-matrix {
+  --veil-bg: #020a05;
+  --veil-panel: #06160d;
+  --veil-panel-2: #0a1f12;
+  --veil-fg: #c7f9d8;
+  --veil-muted: #5f9d74;
+  --veil-border: #123f24;
+}
+.theme-sunset {
+  --veil-bg: #140812;
+  --veil-panel: #231120;
+  --veil-panel-2: #2f1729;
+  --veil-fg: #ffe7f3;
+  --veil-muted: #c58fae;
+  --veil-border: #43213a;
+}
+.theme-mono {
+  --veil-bg: #0a0a0a;
+  --veil-panel: #141414;
+  --veil-panel-2: #1c1c1c;
+  --veil-fg: #ededed;
+  --veil-muted: #8a8a8a;
+  --veil-border: #2a2a2a;
+}

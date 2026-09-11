@@ -1,5 +1,7 @@
 import type { NextRequest } from "next/server"
-import { rewriteHtml, rewriteCss, proxify } from "@/lib/rewrite"
+import { rewriteHtml, rewriteCss, proxify, type RewriteContext } from "@/lib/rewrite"
+import { keyToBytes, encryptUrl, decryptUrl } from "@/lib/crypto"
+import { decodeSettingsCookie, KEY_COOKIE, SETTINGS_COOKIE } from "@/lib/settings"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -17,6 +19,7 @@ const STRIP_REQUEST_HEADERS = new Set([
   "upgrade",
   "content-length",
   "accept-encoding",
+  "cookie",
 ])
 
 // Response headers that would block embedding or leak upstream transport details.
@@ -74,8 +77,26 @@ function blockedResponse() {
 }
 
 async function handle(req: NextRequest) {
-  const target = req.nextUrl.searchParams.get("url")
-  if (!target) return bad("Missing ?url= parameter")
+  const settings = decodeSettingsCookie(req.cookies.get(SETTINGS_COOKIE)?.value)
+
+  // Resolve the target: encrypted (?u=) takes precedence over plaintext (?url=).
+  const keyCookie = req.cookies.get(KEY_COOKIE)?.value
+  const keyBytes = keyCookie ? keyToBytes(keyCookie) : null
+
+  const encToken = req.nextUrl.searchParams.get("u")
+  const plainParam = req.nextUrl.searchParams.get("url")
+
+  let target: string | null = null
+  let encrypted = false
+  if (encToken) {
+    if (!keyBytes) return bad("Missing session key for encrypted request", 400)
+    target = decryptUrl(encToken, keyBytes)
+    encrypted = true
+    if (!target) return bad("Could not decrypt target URL", 400)
+  } else if (plainParam) {
+    target = plainParam
+  }
+  if (!target) return bad("Missing ?url= or ?u= parameter")
 
   let targetUrl: URL
   try {
@@ -89,8 +110,15 @@ async function handle(req: NextRequest) {
 
   // Short-circuit ad/tracker hosts with an inert stub so their scripts never
   // run (and never throw) inside the proxied page.
-  if (isBlockedHost(targetUrl.host)) {
+  if (settings.blockTrackers && isBlockedHost(targetUrl.host)) {
     return blockedResponse()
+  }
+
+  // Encryption context: outgoing links are encrypted only when the incoming
+  // request was, so the whole browsing session stays in one consistent mode.
+  const ctx: RewriteContext = {
+    base: targetUrl.href,
+    encrypt: encrypted && keyBytes ? (url: string) => encryptUrl(url, keyBytes) : null,
   }
 
   // Build upstream request headers.
@@ -99,15 +127,25 @@ async function handle(req: NextRequest) {
     if (!STRIP_REQUEST_HEADERS.has(key.toLowerCase())) headers.set(key, value)
   })
   headers.set("host", targetUrl.host)
-  if (!headers.has("user-agent")) {
+  if (settings.spoofUserAgent || !headers.has("user-agent")) {
     headers.set(
       "user-agent",
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36",
     )
   }
-  // Present ourselves to the origin as if we came from its own site.
-  headers.set("referer", targetUrl.href)
-  headers.set("origin", targetUrl.origin)
+  // Present ourselves to the origin as if we came from its own site, unless the
+  // user has opted to strip the Referer for extra privacy.
+  if (settings.stripReferer) {
+    headers.delete("referer")
+    headers.delete("origin")
+  } else {
+    headers.set("referer", targetUrl.href)
+    headers.set("origin", targetUrl.origin)
+  }
+  if (settings.doNotTrack) {
+    headers.set("dnt", "1")
+    headers.set("sec-gpc", "1")
+  }
 
   const method = req.method.toUpperCase()
   const body = method === "GET" || method === "HEAD" ? undefined : await req.arrayBuffer()
@@ -130,7 +168,7 @@ async function handle(req: NextRequest) {
   if (upstream.status >= 300 && upstream.status < 400) {
     const location = upstream.headers.get("location")
     if (location) {
-      const proxied = proxify(location, targetUrl.href)
+      const proxied = proxify(location, ctx)
       return new Response(null, {
         status: upstream.status,
         headers: { location: proxied },
@@ -143,7 +181,7 @@ async function handle(req: NextRequest) {
     const lower = key.toLowerCase()
     if (STRIP_RESPONSE_HEADERS.has(lower)) return
     if (lower === "location") {
-      resHeaders.set(key, proxify(value, targetUrl.href))
+      resHeaders.set(key, proxify(value, ctx))
       return
     }
     if (lower === "set-cookie") {
@@ -160,14 +198,14 @@ async function handle(req: NextRequest) {
   // Rewrite text formats; stream everything else through untouched.
   if (contentType.includes("text/html")) {
     const html = await upstream.text()
-    const rewritten = rewriteHtml(html, targetUrl.href)
+    const rewritten = rewriteHtml(html, ctx)
     resHeaders.set("content-type", "text/html; charset=utf-8")
     return new Response(rewritten, { status: upstream.status, headers: resHeaders })
   }
 
   if (contentType.includes("css")) {
     const css = await upstream.text()
-    const rewritten = rewriteCss(css, targetUrl.href)
+    const rewritten = rewriteCss(css, ctx)
     resHeaders.set("content-type", contentType || "text/css; charset=utf-8")
     return new Response(rewritten, { status: upstream.status, headers: resHeaders })
   }
