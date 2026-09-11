@@ -4,6 +4,34 @@
   var PATH = window.__PROXY_PATH__ || "/api/proxy"
   var TARGET = window.__PROXY_TARGET__ || location.href
 
+  // Third-party scripts loaded through the proxy (ad/analytics/SDK code) often
+  // throw internal exceptions because they expect first-party origin access
+  // they don't get when proxied. Those errors are harmless to the page but
+  // pollute the console. Swallow errors that originate from a proxied script
+  // URL so they don't surface, while leaving genuine app errors intact.
+  function fromProxiedScript(source) {
+    return typeof source === "string" && source.indexOf(PATH + "?url=") !== -1
+  }
+  window.addEventListener(
+    "error",
+    function (e) {
+      if (e && (fromProxiedScript(e.filename) || (e.target && fromProxiedScript(e.target.src)))) {
+        e.stopImmediatePropagation()
+        e.preventDefault()
+        return true
+      }
+    },
+    true,
+  )
+  window.addEventListener("unhandledrejection", function (e) {
+    try {
+      var stack = e && e.reason && e.reason.stack
+      if (fromProxiedScript(stack)) {
+        e.preventDefault()
+      }
+    } catch (_) {}
+  })
+
   function absolutize(url) {
     try {
       return new URL(url, TARGET).href

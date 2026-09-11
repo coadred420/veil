@@ -39,6 +39,40 @@ function bad(message: string, status = 400) {
   return new Response(message, { status, headers: { "content-type": "text/plain; charset=utf-8" } })
 }
 
+// Ad, analytics, and tracker hosts. These scripts assume a first-party origin
+// with cross-frame access and throw internal errors when run through any proxy
+// (e.g. adsbygoogle.js). They never function proxied, so we short-circuit them
+// with a benign empty stub — this also removes their console noise and cuts
+// unnecessary round-trips, improving page-load latency.
+const BLOCKED_HOST_PATTERNS = [
+  /(^|\.)googlesyndication\.com$/,
+  /(^|\.)doubleclick\.net$/,
+  /(^|\.)googletagmanager\.com$/,
+  /(^|\.)googletagservices\.com$/,
+  /(^|\.)google-analytics\.com$/,
+  /(^|\.)adservice\.google\.[a-z.]+$/,
+  /(^|\.)adnxs\.com$/,
+  /(^|\.)amazon-adsystem\.com$/,
+  /(^|\.)scorecardresearch\.com$/,
+  /(^|\.)quantserve\.com$/,
+]
+
+function isBlockedHost(host: string) {
+  return BLOCKED_HOST_PATTERNS.some((re) => re.test(host))
+}
+
+// A blocked resource resolves to an inert 204/empty asset instead of erroring.
+function blockedResponse() {
+  return new Response("", {
+    status: 200,
+    headers: {
+      "content-type": "application/javascript; charset=utf-8",
+      "access-control-allow-origin": "*",
+      "cache-control": "public, max-age=86400",
+    },
+  })
+}
+
 async function handle(req: NextRequest) {
   const target = req.nextUrl.searchParams.get("url")
   if (!target) return bad("Missing ?url= parameter")
@@ -51,6 +85,12 @@ async function handle(req: NextRequest) {
   }
   if (targetUrl.protocol !== "http:" && targetUrl.protocol !== "https:") {
     return bad("Only http and https are supported")
+  }
+
+  // Short-circuit ad/tracker hosts with an inert stub so their scripts never
+  // run (and never throw) inside the proxied page.
+  if (isBlockedHost(targetUrl.host)) {
+    return blockedResponse()
   }
 
   // Build upstream request headers.
